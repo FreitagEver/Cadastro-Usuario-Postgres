@@ -1,0 +1,160 @@
+﻿unit uDatabase;
+
+interface
+
+uses
+  System.SysUtils, System.IniFiles, System.Hash, System.Win.Registry,
+  Winapi.Windows,
+  FireDAC.Comp.Client, FireDAC.Stan.Intf, FireDAC.Stan.Option,
+  FireDAC.Stan.Error, FireDAC.UI.Intf, FireDAC.Phys.Intf,
+  FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Stan.Async,
+  FireDAC.DApt, FireDAC.Phys, FireDAC.Phys.PG, FireDAC.Phys.PGDef,
+  FireDAC.VCLUI.Wait, System.Classes;
+
+type
+  TDatabase = class
+  private
+    FConnection: TFDConnection;
+    procedure LoadConfig;
+    function FindPostgreSQLBin: string;
+    procedure ConfigurePostgreSQLClient;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Connect;
+    procedure Disconnect;
+    function Connection: TFDConnection;
+    function HashPassword(const APassword: string): string;
+  end;
+
+implementation
+
+constructor TDatabase.Create;
+begin
+  inherited Create;
+  FConnection := TFDConnection.Create(nil);
+  FConnection.LoginPrompt := False;
+end;
+
+destructor TDatabase.Destroy;
+begin
+  FConnection.Free;
+  inherited;
+end;
+
+function TDatabase.FindPostgreSQLBin: string;
+const
+  cInstallationsKey = 'SOFTWARE\PostgreSQL\Installations';
+var
+  vReg: TRegistry;
+  vKeys: TStringList;
+  I: Integer;
+  vBaseDir: string;
+  vCandidate: string;
+begin
+  Result := '';
+
+  vReg := TRegistry.Create(KEY_READ or KEY_WOW64_64KEY);
+  vKeys := TStringList.Create;
+  try
+    vReg.RootKey := HKEY_LOCAL_MACHINE;
+    if vReg.OpenKeyReadOnly(cInstallationsKey) then
+    begin
+      vReg.GetKeyNames(vKeys);
+      vReg.CloseKey;
+
+      for I := 0 to vKeys.Count - 1 do
+      begin
+        if vReg.OpenKeyReadOnly(cInstallationsKey + '\' + vKeys[I]) then
+        begin
+          vBaseDir := vReg.ReadString('Base Directory');
+          vReg.CloseKey;
+          if vBaseDir <> '' then
+          begin
+            vCandidate := IncludeTrailingPathDelimiter(vBaseDir) + 'bin';
+            if FileExists(IncludeTrailingPathDelimiter(vCandidate) + 'libpq.dll') then
+              Exit(vCandidate);
+          end;
+        end;
+      end;
+    end;
+  finally
+    vKeys.Free;
+    vReg.Free;
+  end;
+
+  for vCandidate in ['C:\Program Files\PostgreSQL\15\bin'] do
+  begin
+    if FileExists(IncludeTrailingPathDelimiter(vCandidate) + 'libpq.dll') then
+      Exit(vCandidate);
+  end;
+end;
+
+procedure TDatabase.ConfigurePostgreSQLClient;
+var
+  vPgBin: string;
+  vLibPQ: string;
+begin
+  vPgBin := FindPostgreSQLBin;
+  if vPgBin = '' then
+    raise Exception.Create(
+      'Instalação do PostgreSQL não encontrada.' + sLineBreak +
+      'Não foi possível localizar libpq.dll em uma instalação PostgreSQL x64.');
+
+  vLibPQ := IncludeTrailingPathDelimiter(vPgBin) + 'libpq.dll';
+
+  if not SetDllDirectory(PChar(vPgBin)) then
+    RaiseLastOSError;
+
+  FConnection.DriverName := 'PG';
+  FConnection.Params.Values['VendorLib'] := vLibPQ;
+end;
+
+procedure TDatabase.LoadConfig;
+var
+  vIni: TIniFile;
+  vPath: string;
+begin
+  vPath := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'config.ini';
+  if not FileExists(vPath) then
+    raise Exception.Create('Arquivo config.ini não encontrado.');
+
+  vIni := TIniFile.Create(vPath);
+  try
+    ConfigurePostgreSQLClient;
+    FConnection.Params.Values['Server'] := vIni.ReadString('DATABASE', 'Host', 'localhost');
+    FConnection.Params.Values['Port'] := vIni.ReadString('DATABASE', 'Port', '5432');
+    FConnection.Params.Values['Database'] := vIni.ReadString('DATABASE', 'Database', 'cadastro_usuarios');
+    FConnection.Params.Values['User_Name'] := vIni.ReadString('DATABASE', 'User', 'postgres');
+    FConnection.Params.Values['Password'] := vIni.ReadString('DATABASE', 'Password', '');
+  finally
+    vIni.Free;
+  end;
+end;
+
+procedure TDatabase.Connect;
+begin
+  if not FConnection.Connected then
+  begin
+    LoadConfig;
+    FConnection.Connected := True;
+  end;
+end;
+
+procedure TDatabase.Disconnect;
+begin
+  if FConnection.Connected then
+    FConnection.Connected := False;
+end;
+
+function TDatabase.Connection: TFDConnection;
+begin
+  Result := FConnection;
+end;
+
+function TDatabase.HashPassword(const APassword: string): string;
+begin
+  Result := THashMD5.GetHashString(APassword);
+end;
+
+end.

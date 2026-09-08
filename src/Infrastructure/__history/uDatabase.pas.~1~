@@ -1,0 +1,89 @@
+unit uDatabase;
+
+interface
+
+uses
+  System.SysUtils, System.IniFiles, System.Hash,
+  FireDAC.Comp.Client, FireDAC.Stan.Intf, FireDAC.Stan.Option,
+  FireDAC.Stan.Error, FireDAC.UI.Intf, FireDAC.Phys.Intf,
+  FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Stan.Async,
+  FireDAC.DApt, FireDAC.Phys, FireDAC.Phys.PG, FireDAC.Phys.PGDef,
+  FireDAC.VCLUI.Wait;
+
+type
+  TDatabase = class
+  private
+    FConnection: TFDConnection;
+    procedure LoadConfig;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Connect;
+    procedure Disconnect;
+    function Connection: TFDConnection;
+    function HashPassword(const APassword: string): string;
+  end;
+
+implementation
+
+constructor TDatabase.Create;
+begin
+  inherited Create;
+  FConnection := TFDConnection.Create(nil);
+  FConnection.LoginPrompt := False;
+end;
+
+destructor TDatabase.Destroy;
+begin
+  FConnection.Free;
+  inherited;
+end;
+
+procedure TDatabase.LoadConfig;
+var
+  Ini: TIniFile;
+  Path: string;
+begin
+  Path := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'config.ini';
+  if not FileExists(Path) then
+    raise Exception.Create('Arquivo config.ini não encontrado.');
+
+  Ini := TIniFile.Create(Path);
+  try
+    FConnection.DriverName := 'PG';
+    FConnection.Params.Values['Server'] := Ini.ReadString('DATABASE', 'Host', 'localhost');
+    FConnection.Params.Values['Port'] := Ini.ReadString('DATABASE', 'Port', '5432');
+    FConnection.Params.Values['Database'] := Ini.ReadString('DATABASE', 'Database', 'cadastro_usuarios');
+    FConnection.Params.Values['User_Name'] := Ini.ReadString('DATABASE', 'User', 'postgres');
+    FConnection.Params.Values['Password'] := Ini.ReadString('DATABASE', 'Password', '');
+  finally
+    Ini.Free;
+  end;
+end;
+
+procedure TDatabase.Connect;
+begin
+  if not FConnection.Connected then
+  begin
+    LoadConfig;
+    FConnection.Connected := True;
+  end;
+end;
+
+procedure TDatabase.Disconnect;
+begin
+  if FConnection.Connected then
+    FConnection.Connected := False;
+end;
+
+function TDatabase.Connection: TFDConnection;
+begin
+  Result := FConnection;
+end;
+
+function TDatabase.HashPassword(const APassword: string): string;
+begin
+  Result := THashMD5.GetHashString(APassword);
+end;
+
+end.

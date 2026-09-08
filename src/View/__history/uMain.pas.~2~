@@ -1,0 +1,140 @@
+﻿unit uMain;
+
+interface
+
+uses
+  System.SysUtils, System.Classes, System.Generics.Collections,
+  Vcl.Forms, Vcl.StdCtrls, Vcl.Controls, Vcl.Grids, Vcl.Dialogs,
+  uDatabase, uUsuarioController, uUsuarioModel, uUsuario;
+
+type
+  TfrmMain = class(TForm)
+    btnNovo: TButton;
+    btnEditar: TButton;
+    btnExcluir: TButton;
+    grdUsuarios: TStringGrid;
+    procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
+    procedure btnNovoClick(Sender: TObject);
+    procedure btnEditarClick(Sender: TObject);
+    procedure btnExcluirClick(Sender: TObject);
+  private
+    FDatabase: TDatabase;
+    FController: TUsuarioController;
+    FUsuarios: TObjectList<TUsuario>;
+    procedure CarregarUsuarios;
+    procedure ConfigurarGrid;
+    function IdSelecionado: Integer;
+  end;
+
+var frmMain: TfrmMain;
+
+implementation
+
+{$R *.dfm}
+
+procedure TfrmMain.FormCreate(Sender: TObject);
+begin
+  FDatabase := TDatabase.Create;
+  FController := TUsuarioController.Create(FDatabase);
+  try
+    FDatabase.Connect;
+    ConfigurarGrid;
+    CarregarUsuarios;
+  except
+    on E: Exception do
+    begin
+      MessageDlg('Erro ao iniciar a aplicação:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+      Application.Terminate;
+    end;
+  end;
+end;
+
+procedure TfrmMain.FormDestroy(Sender: TObject);
+begin
+  FUsuarios.Free;
+  FController.Free;
+  FDatabase.Free;
+end;
+
+procedure TfrmMain.ConfigurarGrid;
+begin
+  grdUsuarios.ColCount := 4;
+  grdUsuarios.FixedRows := 1;
+  grdUsuarios.RowCount := 2;
+  grdUsuarios.Cells[0,0] := 'ID';
+  grdUsuarios.Cells[1,0] := 'Nome';
+  grdUsuarios.Cells[2,0] := 'E-mail';
+  grdUsuarios.Cells[3,0] := 'Data de criação';
+  grdUsuarios.ColWidths[0] := 60;
+  grdUsuarios.ColWidths[1] := 230;
+  grdUsuarios.ColWidths[2] := 260;
+  grdUsuarios.ColWidths[3] := 150;
+end;
+
+procedure TfrmMain.CarregarUsuarios;
+var
+  I: Integer;
+begin
+  FreeAndNil(FUsuarios);
+  FUsuarios := FController.Listar;
+  grdUsuarios.RowCount := FUsuarios.Count + 1;
+  for I := 0 to FUsuarios.Count - 1 do
+  begin
+    grdUsuarios.Cells[0,I+1] := FUsuarios[I].Id.ToString;
+    grdUsuarios.Cells[1,I+1] := FUsuarios[I].Nome;
+    grdUsuarios.Cells[2,I+1] := FUsuarios[I].Email;
+    grdUsuarios.Cells[3,I+1] := FormatDateTime('dd/mm/yyyy hh:nn', FUsuarios[I].DataCriacao);
+  end;
+end;
+
+function TfrmMain.IdSelecionado: Integer;
+var
+  vRow: Integer;
+begin
+  Result := 0;
+  vRow := grdUsuarios.Row;
+  if (vRow > 0) and (vRow <= FUsuarios.Count) then
+    Result := FUsuarios[vRow-1].Id;
+end;
+
+procedure TfrmMain.btnNovoClick(Sender: TObject);
+begin
+  if TfrmUsuario.Executar(Self, FController) then CarregarUsuarios;
+end;
+
+procedure TfrmMain.btnEditarClick(Sender: TObject);
+var
+  vId: Integer;
+begin
+  vId := IdSelecionado;
+  if vId = 0 then
+  begin
+    MessageDlg('Selecione um usuário.', mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  if TfrmUsuario.Executar(Self, FController, Id) then CarregarUsuarios;
+end;
+
+procedure TfrmMain.btnExcluirClick(Sender: TObject);
+var
+  vId: Integer;
+begin
+  vId := IdSelecionado;
+  if vId = 0 then
+  begin
+    MessageDlg('Selecione um usuário.', mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  if MessageDlg('Deseja realmente excluir o usuário selecionado?', mtConfirmation, [mbYes,mbNo], 0) = mrYes then
+  begin
+    try
+      FController.Excluir(vId);
+      CarregarUsuarios;
+    except
+      on E: Exception do MessageDlg('Erro ao excluir: ' + E.Message, mtError, [mbOK], 0);
+    end;
+  end;
+end;
+
+end.

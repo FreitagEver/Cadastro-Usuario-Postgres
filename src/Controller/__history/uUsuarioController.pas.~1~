@@ -1,0 +1,168 @@
+unit uUsuarioController;
+
+interface
+
+uses
+  System.SysUtils, System.Generics.Collections,
+  FireDAC.Comp.Client, uUsuarioModel, uDatabase;
+
+type
+  TUsuarioController = class
+  private
+    FDatabase: TDatabase;
+    procedure Validate(const ANome, AEmail, ASenha: string; ARequirePassword: Boolean);
+  public
+    constructor Create(ADatabase: TDatabase);
+    function Listar: TObjectList<TUsuario>;
+    procedure Cadastrar(const ANome, AEmail, ASenha: string);
+    procedure Atualizar(AId: Integer; const ANome, AEmail, ASenha: string);
+    procedure Excluir(AId: Integer);
+    function EmailExiste(const AEmail: string; AId: Integer = 0): Boolean;
+    function GetById(AId: Integer): TUsuario;
+  end;
+
+implementation
+
+constructor TUsuarioController.Create(ADatabase: TDatabase);
+begin
+  inherited Create;
+  FDatabase := ADatabase;
+end;
+
+procedure TUsuarioController.Validate(const ANome, AEmail, ASenha: string; ARequirePassword: Boolean);
+begin
+  if Trim(ANome) = '' then
+    raise Exception.Create('Informe o nome.');
+  if Trim(AEmail) = '' then
+    raise Exception.Create('Informe o e-mail.');
+  if ARequirePassword and (Trim(ASenha) = '') then
+    raise Exception.Create('Informe a senha.');
+  if Pos('@', AEmail) <= 1 then
+    raise Exception.Create('Informe um e-mail válido.');
+end;
+
+function TUsuarioController.EmailExiste(const AEmail: string; AId: Integer): Boolean;
+var Q: TFDQuery;
+begin
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FDatabase.Connection;
+    Q.SQL.Text := 'SELECT 1 FROM usuario WHERE LOWER(email)=LOWER(:email) AND (:id=0 OR id<>:id) LIMIT 1';
+    Q.ParamByName('email').AsString := Trim(AEmail);
+    Q.ParamByName('id').AsInteger := AId;
+    Q.Open;
+    Result := not Q.IsEmpty;
+  finally
+    Q.Free;
+  end;
+end;
+
+procedure TUsuarioController.Cadastrar(const ANome, AEmail, ASenha: string);
+var Q: TFDQuery;
+begin
+  Validate(ANome, AEmail, ASenha, True);
+  if EmailExiste(AEmail) then
+    raise Exception.Create('O e-mail informado já está cadastrado.');
+
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FDatabase.Connection;
+    Q.SQL.Text := 'INSERT INTO usuario (nome,email,senha) VALUES (:nome,:email,:senha)';
+    Q.ParamByName('nome').AsString := Trim(ANome);
+    Q.ParamByName('email').AsString := Trim(AEmail);
+    Q.ParamByName('senha').AsString := FDatabase.HashPassword(ASenha);
+    Q.ExecSQL;
+  finally
+    Q.Free;
+  end;
+end;
+
+procedure TUsuarioController.Atualizar(AId: Integer; const ANome, AEmail, ASenha: string);
+var Q: TFDQuery;
+begin
+  Validate(ANome, AEmail, ASenha, False);
+  if EmailExiste(AEmail, AId) then
+    raise Exception.Create('O e-mail informado já está cadastrado.');
+
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FDatabase.Connection;
+    if Trim(ASenha) <> '' then
+    begin
+      Q.SQL.Text := 'UPDATE usuario SET nome=:nome,email=:email,senha=:senha WHERE id=:id';
+      Q.ParamByName('senha').AsString := FDatabase.HashPassword(ASenha);
+    end
+    else
+      Q.SQL.Text := 'UPDATE usuario SET nome=:nome,email=:email WHERE id=:id';
+
+    Q.ParamByName('nome').AsString := Trim(ANome);
+    Q.ParamByName('email').AsString := Trim(AEmail);
+    Q.ParamByName('id').AsInteger := AId;
+    Q.ExecSQL;
+  finally
+    Q.Free;
+  end;
+end;
+
+procedure TUsuarioController.Excluir(AId: Integer);
+var Q: TFDQuery;
+begin
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FDatabase.Connection;
+    Q.SQL.Text := 'DELETE FROM usuario WHERE id=:id';
+    Q.ParamByName('id').AsInteger := AId;
+    Q.ExecSQL;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TUsuarioController.Listar: TObjectList<TUsuario>;
+var Q: TFDQuery; U: TUsuario;
+begin
+  Result := TObjectList<TUsuario>.Create(True);
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FDatabase.Connection;
+    Q.SQL.Text := 'SELECT id,nome,email,data_criacao FROM usuario ORDER BY id';
+    Q.Open;
+    while not Q.Eof do
+    begin
+      U := TUsuario.Create;
+      U.Id := Q.FieldByName('id').AsInteger;
+      U.Nome := Q.FieldByName('nome').AsString;
+      U.Email := Q.FieldByName('email').AsString;
+      U.DataCriacao := Q.FieldByName('data_criacao').AsDateTime;
+      Result.Add(U);
+      Q.Next;
+    end;
+  finally
+    Q.Free;
+  end;
+end;
+
+function TUsuarioController.GetById(AId: Integer): TUsuario;
+var Q: TFDQuery;
+begin
+  Result := nil;
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FDatabase.Connection;
+    Q.SQL.Text := 'SELECT id,nome,email,data_criacao FROM usuario WHERE id=:id';
+    Q.ParamByName('id').AsInteger := AId;
+    Q.Open;
+    if not Q.IsEmpty then
+    begin
+      Result := TUsuario.Create;
+      Result.Id := Q.FieldByName('id').AsInteger;
+      Result.Nome := Q.FieldByName('nome').AsString;
+      Result.Email := Q.FieldByName('email').AsString;
+      Result.DataCriacao := Q.FieldByName('data_criacao').AsDateTime;
+    end;
+  finally
+    Q.Free;
+  end;
+end;
+
+end.

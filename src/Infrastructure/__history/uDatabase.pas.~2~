@@ -1,0 +1,168 @@
+﻿unit uDatabase;
+
+interface
+
+uses
+  System.SysUtils, System.IniFiles, System.Hash, System.Win.Registry,
+  Winapi.Windows,
+  FireDAC.Comp.Client, FireDAC.Stan.Intf, FireDAC.Stan.Option,
+  FireDAC.Stan.Error, FireDAC.UI.Intf, FireDAC.Phys.Intf,
+  FireDAC.Stan.Def, FireDAC.Stan.Pool, FireDAC.Stan.Async,
+  FireDAC.DApt, FireDAC.Phys, FireDAC.Phys.PG, FireDAC.Phys.PGDef,
+  FireDAC.VCLUI.Wait, System.Classes;
+
+type
+  TDatabase = class
+  private
+    FConnection: TFDConnection;
+    procedure LoadConfig;
+    function FindPostgreSQLBin: string;
+    procedure ConfigurePostgreSQLClient;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Connect;
+    procedure Disconnect;
+    function Connection: TFDConnection;
+    function HashPassword(const APassword: string): string;
+  end;
+
+implementation
+
+constructor TDatabase.Create;
+begin
+  inherited Create;
+  FConnection := TFDConnection.Create(nil);
+  FConnection.LoginPrompt := False;
+end;
+
+destructor TDatabase.Destroy;
+begin
+  FConnection.Free;
+  inherited;
+end;
+
+function TDatabase.FindPostgreSQLBin: string;
+const
+  InstallationsKey = 'SOFTWARE\PostgreSQL\Installations';
+var
+  Reg: TRegistry;
+  Keys: TStringList;
+  I: Integer;
+  BaseDir: string;
+  Candidate: string;
+begin
+  Result := '';
+
+  { Procura a instalação registrada pelo instalador oficial do PostgreSQL. }
+  Reg := TRegistry.Create(KEY_READ or KEY_WOW64_64KEY);
+  Keys := TStringList.Create;
+  try
+    Reg.RootKey := HKEY_LOCAL_MACHINE;
+    if Reg.OpenKeyReadOnly(InstallationsKey) then
+    begin
+      Reg.GetKeyNames(Keys);
+      Reg.CloseKey;
+
+      for I := 0 to Keys.Count - 1 do
+      begin
+        if Reg.OpenKeyReadOnly(InstallationsKey + '\' + Keys[I]) then
+        begin
+          BaseDir := Reg.ReadString('Base Directory');
+          Reg.CloseKey;
+          if BaseDir <> '' then
+          begin
+            Candidate := IncludeTrailingPathDelimiter(BaseDir) + 'bin';
+            if FileExists(IncludeTrailingPathDelimiter(Candidate) + 'libpq.dll') then
+              Exit(Candidate);
+          end;
+        end;
+      end;
+    end;
+  finally
+    Keys.Free;
+    Reg.Free;
+  end;
+
+  { Fallback para instalações padrão. }
+  for Candidate in [
+    'C:\Program Files\PostgreSQL\15\bin',
+    'C:\Program Files\PostgreSQL\16\bin',
+    'C:\Program Files\PostgreSQL\17\bin',
+    'C:\Program Files\PostgreSQL\18\bin'] do
+  begin
+    if FileExists(IncludeTrailingPathDelimiter(Candidate) + 'libpq.dll') then
+      Exit(Candidate);
+  end;
+end;
+
+procedure TDatabase.ConfigurePostgreSQLClient;
+var
+  PgBin: string;
+  LibPQ: string;
+begin
+  PgBin := FindPostgreSQLBin;
+  if PgBin = '' then
+    raise Exception.Create(
+      'Instalação do PostgreSQL não encontrada.' + sLineBreak +
+      'Não foi possível localizar libpq.dll em uma instalação PostgreSQL x64.');
+
+  LibPQ := IncludeTrailingPathDelimiter(PgBin) + 'libpq.dll';
+
+  { Faz o Windows procurar as DLLs dependentes de libpq.dll na pasta bin do PostgreSQL. }
+  if not SetDllDirectory(PChar(PgBin)) then
+    RaiseLastOSError;
+
+  { Informa ao FireDAC exatamente qual libpq deve ser utilizada. }
+  FConnection.DriverName := 'PG';
+  FConnection.Params.Values['VendorLib'] := LibPQ;
+end;
+
+procedure TDatabase.LoadConfig;
+var
+  Ini: TIniFile;
+  Path: string;
+begin
+  Path := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'config.ini';
+  if not FileExists(Path) then
+    raise Exception.Create('Arquivo config.ini não encontrado.');
+
+  Ini := TIniFile.Create(Path);
+  try
+    ConfigurePostgreSQLClient;
+    FConnection.Params.Values['Server'] := Ini.ReadString('DATABASE', 'Host', 'localhost');
+    FConnection.Params.Values['Port'] := Ini.ReadString('DATABASE', 'Port', '5432');
+    FConnection.Params.Values['Database'] := Ini.ReadString('DATABASE', 'Database', 'cadastro_usuarios');
+    FConnection.Params.Values['User_Name'] := Ini.ReadString('DATABASE', 'User', 'postgres');
+    FConnection.Params.Values['Password'] := Ini.ReadString('DATABASE', 'Password', '');
+  finally
+    Ini.Free;
+  end;
+end;
+
+procedure TDatabase.Connect;
+begin
+  if not FConnection.Connected then
+  begin
+    LoadConfig;
+    FConnection.Connected := True;
+  end;
+end;
+
+procedure TDatabase.Disconnect;
+begin
+  if FConnection.Connected then
+    FConnection.Connected := False;
+end;
+
+function TDatabase.Connection: TFDConnection;
+begin
+  Result := FConnection;
+end;
+
+function TDatabase.HashPassword(const APassword: string): string;
+begin
+  Result := THashMD5.GetHashString(APassword);
+end;
+
+end.

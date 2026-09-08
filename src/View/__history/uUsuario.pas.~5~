@@ -1,0 +1,81 @@
+﻿unit uUsuario;
+
+interface
+
+uses
+  System.SysUtils, System.Classes, Vcl.Forms, Vcl.StdCtrls, Vcl.Controls,
+  Vcl.Dialogs, uUsuarioController, uUsuarioModel;
+
+type
+  TfrmUsuario = class(TForm)
+    lblNome: TLabel;
+    lblEmail: TLabel;
+    lblSenha: TLabel;
+    edtNome: TEdit;
+    edtEmail: TEdit;
+    edtSenha: TEdit;
+    btnSalvar: TButton;
+    btnCancelar: TButton;
+    procedure btnSalvarClick(Sender: TObject);
+  private
+    FController: TUsuarioController;
+    FId: Integer;
+    FEdicao: Boolean;
+  public
+    class function Executar(AOwner: TComponent; AController: TUsuarioController; AId: Integer = 0): Boolean;
+  end;
+
+implementation
+
+{$R *.dfm}
+
+class function TfrmUsuario.Executar(AOwner: TComponent; AController: TUsuarioController; AId: Integer): Boolean;
+var
+  vFrmUsu: TfrmUsuario;
+  vUsu: TUsuario;
+begin
+  vFrmUsu := TfrmUsuario.Create(AOwner);
+  try
+    vFrmUsu.FController := AController;
+    vFrmUsu.FId := AId;
+    vFrmUsu.FEdicao := AId > 0;
+
+    if vFrmUsu.FEdicao then
+    begin
+      vFrmUsu.Caption := 'Editar usuário';
+      vFrmUsu.lblSenha.Caption := 'Nova senha';
+      vUsu := AController.GetById(AId);
+      try
+        if Assigned(vUsu) then
+        begin
+          vFrmUsu.edtNome.Text := vUsu.Nome;
+          vFrmUsu.edtEmail.Text := vUsu.Email;
+        end;
+      finally
+        vUsu.Free;
+      end;
+    end
+    else
+      vFrmUsu.Caption := 'Novo usuário';
+
+    Result := vFrmUsu.ShowModal = mrOk;
+  finally
+    vFrmUsu.Free;
+  end;
+end;
+
+procedure TfrmUsuario.btnSalvarClick(Sender: TObject);
+begin
+  try
+    if FEdicao then
+      FController.Atualizar(FId, edtNome.Text, edtEmail.Text, edtSenha.Text)
+    else
+      FController.Cadastrar(edtNome.Text, edtEmail.Text, edtSenha.Text);
+    ModalResult := mrOk;
+  except
+    on E: Exception do
+      MessageDlg(E.Message, mtError, [mbOK], 0);
+  end;
+end;
+
+end.
